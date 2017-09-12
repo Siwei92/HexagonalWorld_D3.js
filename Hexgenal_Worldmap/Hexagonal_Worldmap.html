@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+
+.node {
+  fill: none;
+  stroke: #ccc;
+  shape-rendering: crispEdges;
+  stroke: black;
+  stroke-width: 0.25px;
+}
+
+path {
+  stroke: white;
+  stroke-width: 0.25px;
+  fill: grey;
+}
+
+.hexagon {
+  fill: none;
+  stroke: #fff;
+  stroke-width: .5px;
+}
+
+</style>
+<body>
+
+    <input name="Snowflake Fractal Subdivision" 
+           type="button" 
+           value="Snowflake Fractal Subdivision" 
+           onclick="Snowflake()" />
+
+
+    <input name="HideHexagon" 
+           type="button" 
+           value="HideHexagon" 
+           onclick="hexagonHiden()" />
+
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<script src="http://d3js.org/topojson.v0.min.js"></script>
+<script src="https://d3js.org/d3-quadtree.v1.min.js"></script>
+<script src="http://d3js.org/d3.hexbin.v0.min.js?5c6e4f0"></script>
+<script>
+
+
+var width = 1000,
+    height = 500;
+
+//Store all the subhexagons into array to mannipulate them
+var globalHexagonArray= [];
+//Store all the hexagon into array to mannipulate them
+var testglobalHexagonArray;
+//initializion of the subhexagon radius
+var lR=5;
+//initialication of iteration
+var callTimes = 0;
+//the rotate angle of Snowflake Fractal Algorithm
+var Angle = 180/Math.PI * ( Math.asin( Math.sqrt(3)/(2*Math.sqrt(7))));
+//the times of iteration
+var UserDesignCallTimes=3;
+
+// Define map projection 
+var projection = d3.geo.mercator()
+    .center([0,0])
+    .scale(150)
+    .translate([width/2, 333])
+    .rotate([-180,0]);
+
+var svg = d3.select("body").append("svg")
+    .attr("width", width)
+    .attr("height", height);
+//Apply projection to map
+var path = d3.geo.path()
+    .projection(projection);
+
+var g = svg.append("g");
+
+//Define the hexbin 
+var hexbin = d3.hexbin()
+    .size([width, height])
+    .radius(5);
+//Define the color for hexbin
+var color = d3.scale.linear()
+    .domain([0, 3])
+    .range(["yellow", "darkred"])
+    .interpolate(d3.interpolateLab);
+
+var scaleRecord=10;
+var quadtree;
+var zoomposition=[];
+var hexagonradius=0;
+var HexagonLocation=[];
+var citycircle;
+var city;
+
+// load and display the World
+d3.json("1.json", function(error, topology) {
+    g.selectAll("path")
+      .data(topojson.object(topology, topology.objects.countries)
+      .geometries)
+      .enter()
+      .append("path")
+      .attr("d", path)
+});
+
+
+
+d3.json("test.json", function(error, places) {
+var pointlocation=[];
+         city = g.selectAll("citycircle")
+        .data(places)
+        .enter()
+        .append("g")
+        .attr("transform",function(d){
+            var coor = projection([d.lon, d.lat]);
+            pointlocation.push({0:coor[0],1:coor[1]});
+            return "translate("+ coor[0] + "," + coor[1] +")";
+        })
+        citycircle = city.append("circle")
+        .attr("fill","red")
+        .attr("r",1)
+        .on("click", function(d) { 
+          var coor = projection([d.lon, d.lat]);
+          clicked(coor[0],coor[1],d.name);
+          d3.select(this).attr("fill", "yellow");
+        });
+
+
+  //Define Quadtree
+  quadtree = d3.geom.quadtree()
+               .extent([[-1, -1], [width + 1, height + 1]])
+                (pointlocation);
+
+  // Collapse the quadtree into an array of rectangles.
+  function nodes(quadtree) {
+    var nodes = [];
+    quadtree.visit(function(node, x0, y0, x1, y1) {
+      node.x0 = x0, node.y0 = y0;
+      node.x1 = x1, node.y1 = y1;
+      nodes.push(node);
+    });
+    return nodes;
+  }
+
+  //Append recangles for quadtree
+  g.selectAll(".node")
+    .data(nodes(quadtree))
+    .enter().append("rect")
+      .attr("class", "node")
+      .attr("x", function(d) { return d.x0; })
+      .attr("y", function(d) { return d.y0; })
+      .attr("width", function(d) { return d.y1 - d.y0; })
+      .attr("height", function(d) { return d.x1 - d.x0; });
+  //Append hexagn grid on map
+    testglobalHexagonArray=svg.selectAll(".hexagon")
+    .data(hexbin(pointlocation))
+    .enter().append("path")
+    .attr("class", "hexagon")
+    .attr("d", hexbin.hexagon())
+    .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; })
+    .attr("class", function(d) { HexagonLocation.push({x:d.x,y:d.y})})
+    .style("fill", function(d) { return color(d.length); });
+
+});
+
+
+// zoom and pan
+var zoom = d3.behavior.zoom()
+    .scaleExtent([1, 10])
+    .on("zoom",function() {
+
+    scaleRecord=d3.scale;
+
+    g.attr("transform","translate("+ d3.event.translate.join(",")+")scale("+d3.event.scale+")");
+    g.attr("transform","translate("+ d3.event.translate.join(",")+")scale("+d3.event.scale+")");
+
+    g.selectAll("path").attr("d", path.projection(projection));   
+    citycircle.attr('r',function() { if (d3.event.scale<2) return 1.5; else return 1.5/(d3.event.scale/2); }) 
+
+    hideData();
+    //remove the existed hexagon
+    HexagonLocation=[];
+    testglobalHexagonArray.remove();
+    //Regenerate hexagon based on the point on the screen
+    var hexbin = d3.hexbin() 
+    .size([width, height])
+    .radius(d3.event.scale*2);
+    //The radius of subhexagon is based on the scale
+    lR=d3.event.scale*2;
+    //recalculate the position of each point
+    zoomposition=[];
+    city.each(function() {
+    zoomposition.push({0:d3.transform(d3.select(this).attr("transform")).translate[0]*d3.event.scale+d3.transform(g.attr("transform")).translate[0],1:d3.transform(d3.select(this).attr("transform")).translate[1]*d3.event.scale+d3.transform(g.attr("transform")).translate[1]});
+});
+    //Rebuild the hexagon grid 
+   testglobalHexagonArray=svg.selectAll(".hexagon")
+    .data(hexbin(zoomposition))
+    .enter().append("path")
+    .attr("class", "hexagon")
+    .attr("d", hexbin.hexagon())
+    .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; })
+    .attr("class", function(d) { HexagonLocation.push({x:d.x,y:d.y})})
+    .style("fill", function(d) { return color(d.length); });
+
+})
+svg.call(zoom);
+
+function clicked(lon,lat) {
+
+      citycircle.each(function() {        
+        d3.select(this).attr("fill", "red");
+      });
+}
+
+
+function hexagonHiden(){
+    testglobalHexagonArray.remove();
+}
+function Snowflake(){
+//Call generateFracalHexagon function to apply Snowflake Fractal Algorithm
+   for(var i=0;i<HexagonLocation.length;i++){
+      generateFracalHexagon(lR,HexagonLocation[i].x,HexagonLocation[i].y,Angle);
+   }
+} 
+
+
+function hideData(){
+ for (var i=0;i<globalHexagonArray.length;i++){
+       globalHexagonArray[i].remove();
+     }
+} 
+
+
+function generateFracalHexagon(HexagonRedius,CenterPositionX,CenterPositionY,RotateAngle){
+
+callTimes++;
+var interHexagonArray= [];
+var largeRedius = HexagonRedius;
+var redius = largeRedius/Math.sqrt(7);
+var subD = redius * Math.sqrt(3)
+var rotateAngle = RotateAngle;
+
+
+//each point position in hexagon coording to center position 
+var points = [
+      {"x":0,"y":0-redius},
+      {"x":(redius/2*Math.sqrt(3)),"y":0-redius/2},
+      {"x":(redius/2*Math.sqrt(3)),"y":0+redius/2},
+      {"x":0,"y":0+redius},
+      {"x":(0-redius/2*Math.sqrt(3)),"y":0+redius/2},
+      {"x":(0-redius/2*Math.sqrt(3)),"y":0-redius/2}
+    ]
+
+//center hexagon
+var qx = CenterPositionX;
+var qy = CenterPositionY;
+
+var hexagon = svg.append("g")
+.selectAll(".hexagon")
+.data(points)
+.enter()
+.append("polygon")
+.attr("points", points.map(function(p) {
+  return p.x + "," + p.y;
+}).join(" "))
+.style("fill-opacity", 0)
+.attr("stroke","black")
+.attr("stroke-width",1);
+hexagon.attr("transform", "translate(" + qx + "," + qy + ")rotate(" + rotateAngle + ")");
+
+interHexagonArray.push({x:qx,y:qy});
+globalHexagonArray.push(hexagon);
+
+//top hexagon
+
+var dx = subD * Math.sin((30-rotateAngle)*Math.PI/180);
+var dy = subD * Math.cos((30-rotateAngle)*Math.PI/180);
+var qx1 = qx-dx;
+var qy1 = qy-dy;
+
+
+var hexagon1 = svg.append("g")
+.selectAll(".hexagon")
+.data(points)
+.enter()
+.append("polygon")
+.attr("points", points.map(function(p) {
+  return p.x + "," + p.y;
+}).join(" "))
+.style("fill-opacity", 0)
+.attr("stroke","black")
+.attr("stroke-width",1);
+hexagon1.attr("transform", "translate(" + qx1 + "," + qy1 + ")rotate(" + rotateAngle + ")");
+
+
+interHexagonArray.push({x:qx1,y:qy1});
+globalHexagonArray.push(hexagon1);
+
+//right top hexagon
+
+ 
+ var qx2 = qx+ subD * Math.cos((60-rotateAngle)*Math.PI/180);
+ var qy2 = qy- subD * Math.sin((60-rotateAngle)*Math.PI/180);;
+
+var hexagon2 = svg.append("g")
+.selectAll(".hexagon")
+.data(points)
+.enter()
+.append("polygon")
+.attr("points", points.map(function(p) {
+  return p.x + "," + p.y;
+}).join(" "))
+.style("fill-opacity", 0)
+.attr("stroke","black")
+.attr("stroke-width",1);
+hexagon2.attr("transform", "translate(" + qx2 + "," + qy2 + ")rotate(" + rotateAngle + ")");
+
+interHexagonArray.push({x:qx2,y:qy2});
+
+globalHexagonArray.push(hexagon2);
+//right bottom hexagon
+qx3 = qx+subD * Math.cos(rotateAngle*Math.PI/180);
+qy3=  qy+subD * Math.sin(rotateAngle*Math.PI/180);
+
+
+var hexagon3 = svg.append("g")
+.selectAll(".hexagon")
+.data(points)
+.enter()
+.append("polygon")
+.attr("points", points.map(function(p) {
+  return p.x + "," + p.y;
+}).join(" "))
+.style("fill-opacity", 0)
+.attr("stroke","black")
+.attr("stroke-width",1);
+
+hexagon3.attr("transform", "translate(" + qx3 + "," + qy3 + ")rotate(" + rotateAngle + ")");
+
+interHexagonArray.push({x:qx3,y:qy3});
+globalHexagonArray.push(hexagon3);
+// bottom hexagon
+qx4 = qx + subD * Math.sin((30-rotateAngle)*Math.PI/180);
+qy4 = qy + subD * Math.cos((30-rotateAngle)*Math.PI/180);
+
+
+var hexagon4 = svg.append("g")
+.selectAll(".hexagon")
+.data(points)
+.enter()
+.append("polygon")
+.attr("points", points.map(function(p) {
+  return p.x + "," + p.y;
+}).join(" "))
+.style("fill-opacity", 0)
+.attr("stroke","black")
+.attr("stroke-width",1);
+
+hexagon4.attr("transform", "translate(" + qx4 + "," + qy4 + ")rotate(" + rotateAngle + ")");
+
+interHexagonArray.push({x:qx4,y:qy4});
+//left bottom hexagon
+globalHexagonArray.push(hexagon4);
+qx5 = qx-subD * Math.cos((60-rotateAngle)*Math.PI/180);
+qy5 = qy+subD * Math.sin((60-rotateAngle)*Math.PI/180);
+
+
+var hexagon5 = svg.append("g")
+.selectAll(".hexagon")
+.data(points)
+.enter()
+.append("polygon")
+.attr("points", points.map(function(p) {
+  return p.x + "," + p.y;
+}).join(" "))
+.style("fill-opacity", 0)
+.attr("stroke","black")
+.attr("stroke-width",1);
+
+hexagon5.attr("transform", "translate(" + qx5 + "," + qy5 + ")rotate(" + rotateAngle + ")");
+globalHexagonArray.push(hexagon5);
+interHexagonArray.push({x:qx5,y:qy5});
+//left top hexagon
+
+qx6 = qx-subD * Math.cos((rotateAngle)*Math.PI/180);
+qy6 = qy-subD * Math.sin((rotateAngle)*Math.PI/180);
+
+
+var hexagon6 = svg.append("g")
+.selectAll(".hexagon")
+.data(points)
+.enter()
+.append("polygon")
+.attr("points", points.map(function(p) {
+  return p.x + "," + p.y;
+}).join(" "))
+.style("fill-opacity", 0)
+.attr("stroke","black")
+.attr("stroke-width",1);
+
+hexagon6.attr("transform", "translate(" + qx6 + "," + qy6 + ")rotate(" + rotateAngle + ")");
+globalHexagonArray.push(hexagon6);
+interHexagonArray.push({x:qx6,y:qy6});
+
+  if(callTimes<UserDesignCallTimes){
+    var temprotarion = rotateAngle+180/Math.PI * ( Math.asin( Math.sqrt(3)/(2*Math.sqrt(7))));
+    for(var k=0;k<interHexagonArray.length;k++){
+     generateFracalHexagon(redius,interHexagonArray[k].x,interHexagonArray[k].y,temprotarion);
+    }
+  }
+}
+
+
+</script>
+</body>
+</html>
